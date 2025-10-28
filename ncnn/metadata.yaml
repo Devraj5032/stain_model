@@ -1,0 +1,22 @@
+description: Ultralytics YOLO11n model trained on /content/datasets/jetson nano project
+  2.0.v1i.yolov11/data.yaml
+author: Ultralytics
+date: '2025-10-28T12:48:28.078228'
+version: 8.3.220
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: footprint
+  1: glass
+  2: stain
+  3: stairs
+args:
+  batch: 1
+  half: false
+channels: 3
