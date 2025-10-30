@@ -1,83 +1,60 @@
-from flask import Flask, request, jsonify
-from PIL import Image
-import io
-import numpy as np
-import ncnn
-import time
 import cv2
-import yaml
-import torch
+import time
+import os
+import psutil
 
-app = Flask(__name__)
+# Prevent Wayland/Qt errors on Raspberry Pi
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-# ================================
-# 🔹 Load NCNN Model at Startup
-# ================================
-net = ncnn.Net()
-net.load_param("./model.ncnn.param")
-net.load_model("./model.ncnn.bin")
+print("🎥 Starting camera preview locked at 6 FPS... Press 'q' to quit.")
 
-# Load metadata (contains class names, anchors, etc.)
-with open("metadata.yaml", "r") as f:
-    metadata = yaml.safe_load(f)
-CLASS_NAMES = metadata.get("names", [])
+cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("❌ Could not open camera")
+    exit(1)
 
-# Define input and output names (change if your model uses different ones)
-INPUT_NAME = "in0"
-OUTPUT_NAME = "out0"
+TARGET_FPS = 6
+FRAME_INTERVAL = 1.0 / TARGET_FPS  # ≈0.166 seconds
 
-# ================================
-# 🔹 Helper: Preprocess Image
-# ================================
-def preprocess_image(pil_image):
-    img = np.array(pil_image.convert("RGB"))
-    img = cv2.resize(img, (640, 640))
-    img = img.astype(np.float32) / 255.0
-    img = img.transpose(2, 0, 1)  # CHW
-    return img
+last_time = time.time()
+frame_count = 0
+start_time = time.time()
 
-# ================================
-# 🔹 Helper: Run Inference
-# ================================
-def infer_ncnn(pil_image):
-    img = preprocess_image(pil_image)
-    with net.create_extractor() as ex:
-        ex.input(INPUT_NAME, ncnn.Mat(img))
-        ret, out = ex.extract(OUTPUT_NAME)
-        return np.array(out)
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        continue
 
-# ================================
-# 🔹 Flask Prediction Route
-# ================================
-@app.route("/predict", methods=["POST"])
-def predict():
-    if "image" not in request.files:
-        return jsonify({"error": "No image file provided"}), 400
+    # FPS regulation: wait if frame is too early
+    now = time.time()
+    elapsed = now - last_time
+    if elapsed < FRAME_INTERVAL:
+        time.sleep(FRAME_INTERVAL - elapsed)
+    last_time = time.time()
 
-    file = request.files["image"]
-    image_name = file.filename
-    image_bytes = file.read()
-    pil_image = Image.open(io.BytesIO(image_bytes))
+    # Count FPS over time (for display only)
+    frame_count += 1
+    duration = time.time() - start_time
+    if duration >= 1:
+        fps_display = frame_count / duration
+        frame_count = 0
+        start_time = time.time()
+    else:
+        fps_display = TARGET_FPS
 
-    start_time = time.time()
-    output = infer_ncnn(pil_image)
-    inference_time = (time.time() - start_time) * 1000  # ms
+    # System stats
+    temps = os.popen("vcgencmd measure_temp").read().strip().replace("temp=", "")
+    cpu = psutil.cpu_percent()
+    mem = psutil.virtual_memory().percent
 
-    # NOTE ⚠️: This is placeholder logic.
-    # Actual bounding boxes depend on your model output structure.
-    # Once you show me what `output.shape` looks like, I’ll give you exact postprocessing.
-    detections = []
-    print("Model output shape:", output.shape)
+    text = f"FPS: {fps_display:.1f} | CPU: {cpu:.1f}% | MEM: {mem:.1f}% | {temps}"
+    cv2.putText(frame, text, (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    response = {
-        "image_name": image_name,
-        "model": "YOLOv11-NCNN",
-        "detections": detections,
-        "inference_time_ms": round(inference_time, 2),
-    }
+    cv2.imshow("Camera Preview", frame)
 
-    return jsonify(response)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+cap.release()
+cv2.destroyAllWindows()

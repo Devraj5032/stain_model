@@ -1,0 +1,6 @@
+# Core dependencies
+opencv-python
+psutil
+
+# Optional (for better compatibility on Raspberry Pi)
+numpy<2.0
